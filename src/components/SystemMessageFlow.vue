@@ -1,7 +1,9 @@
 <template>
   <div class="system-message-flow">
     <div class="controls">
-      <button @click="exportFlow" class="export-btn">Export Flow</button>
+      <button @click="saveFlow" class="save-btn" :disabled="isSaving">
+        {{ isSaving ? "Saving..." : "Save Flow" }}
+      </button>
     </div>
     <VueFlow
       v-model="elements"
@@ -20,7 +22,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from "vue";
+import { ref, onMounted, watch } from "vue";
 import { VueFlow } from "@vue-flow/core";
 import { Background } from "@vue-flow/background";
 import { Controls } from "@vue-flow/controls";
@@ -30,87 +32,130 @@ import "@vue-flow/core/dist/theme-default.css";
 import "@vue-flow/minimap/dist/style.css";
 import "@vue-flow/controls/dist/style.css";
 import SystemMessageNode from "./SystemMessageNode.vue";
-
-const SYSTEM_MESSAGE_PIECES = {
-  introduction: `
-You are Halsell AI, a powerful, male and professional voice assistant for Halsell CRM. Your job is to assist businesses with CRM onboarding, support, and operations.
-`,
-  tone_guidelines: `
-Be clear, confident, and efficient.
-Maintain a professional yet friendly tone.
-Keep responses concise and helpful.
-`,
-  user_guidance: `
-Guide users, answer questions, and connect calls when needed.
-`,
-  team_members: `
-Available team members for call transfers:
-- Technical Support: Shanmukh (+917995235525)
-- Head of Sales: Amit Aggarwal (+918054012673)
-`,
-  transfer_logic: `
-When a user requests to speak with any of these team members or roles (using phrases like "I want to speak to the manager", "transfer me to sales", "connect me with support", "call Shanmukh", etc.), respond with exactly:
-"TRANSFER_REQUEST:[PHONE_NUMBER]" where [PHONE_NUMBER] is the complete phone number including country code.
-`,
-  transfer_example: `
-For example, if they want the manager, "I'll connect you with our manager, right away."
-`,
-  welcome_message: `
-Example Start:
-"Welcome to Halsell AI! How can I assist you today?"
-`,
-  closing: `
-Stay focused, stay sharp, and deliver value.
-`,
-};
+import { useRoute } from "vue-router";
+import { useMessageStore } from "../stores/messageStore";
 
 const nodeTypes = {
   "system-message": SystemMessageNode,
 };
 
 const elements = ref([]);
-
-const halsellAiPipecatNodes = Object.keys(SYSTEM_MESSAGE_PIECES).map(
-  (key, index) => ({
-    id: `node-${index + 1}`,
-    type: "system-message",
-    position: { x: 250, y: 100 + index * 250 }, // Increased vertical spacing
-    label: key
-      .split("_")
-      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(" "),
-    data: {
-      content: SYSTEM_MESSAGE_PIECES[key].trim(),
-    },
-  })
-);
+const isSaving = ref(false);
+const route = useRoute();
+const { messageData, fetchMessages, saveMessages } = useMessageStore();
 
 // Generate edges to connect nodes sequentially
-const halsellAiPipecatEdges = halsellAiPipecatNodes
-  .slice(1)
-  .map((node, index) => ({
+const generateEdges = (nodes) => {
+  return nodes.slice(1).map((node, index) => ({
     id: `edge-${index + 1}`,
-    source: halsellAiPipecatNodes[index].id,
+    source: nodes[index].id,
     target: node.id,
     type: "smoothstep",
     label: "↓",
     style: { stroke: "#a094e0" },
   }));
-
-// Export function to stitch pieces back into the full message
-const exportFlow = () => {
-  const fullMessage = Object.values(SYSTEM_MESSAGE_PIECES).join("\n").trim();
-  const blob = new Blob([fullMessage], { type: "text/plain" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "system-message.txt";
-  a.click();
-  URL.revokeObjectURL(url);
 };
 
-onMounted(() => {
-  elements.value = [...halsellAiPipecatNodes, ...halsellAiPipecatEdges];
+const getFlowConfig = () => {
+  if (route.path.includes("incoming")) {
+    return {
+      nodes: Object.entries(messageData.value.incoming || {}).map(
+        ([key, content], index) => ({
+          id: `node-${index + 1}`,
+          type: "system-message",
+          position: { x: 250, y: 100 + index * 250 },
+          label: key
+            .split("_")
+            .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+            .join(" "),
+          data: {
+            content: content.trim(),
+          },
+        })
+      ),
+      title: "Incoming Call Handler",
+    };
+  } else if (route.path.includes("outgoing")) {
+    return {
+      nodes: Object.entries(messageData.value.outgoing || {}).map(
+        ([key, content], index) => ({
+          id: `node-${index + 1}`,
+          type: "system-message",
+          position: { x: 250, y: 100 + index * 250 },
+          label: key
+            .split("_")
+            .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+            .join(" "),
+          data: {
+            content: content.trim(),
+          },
+        })
+      ),
+      title: "Outgoing Call Handler",
+    };
+  }
+
+  return {
+    nodes: [],
+    title: "System Message Flow",
+  };
+};
+
+// Watch for changes in messageData and update flow when data is available
+watch(
+  messageData,
+  async (newData) => {
+    if (newData && (newData.incoming || newData.outgoing)) {
+      const flowConfig = getFlowConfig();
+      elements.value = [
+        ...flowConfig.nodes,
+        ...generateEdges(flowConfig.nodes),
+      ];
+    }
+  },
+  { immediate: true }
+);
+
+// Save function to update the system messages via API
+const saveFlow = async () => {
+  isSaving.value = true;
+
+  try {
+    // Get all nodes and their content
+    const nodes = elements.value.filter((el) => el.type === "system-message");
+
+    // Create a structured object from the nodes
+    const structuredMessage = nodes.reduce((acc, node) => {
+      // Convert the label back to snake_case for the key
+      const key = node.label.toLowerCase().split(" ").join("_");
+      acc[key] = node.data.content;
+      return acc;
+    }, {});
+
+    // Determine the message type based on the route
+    const messageType = route.path.includes("incoming")
+      ? "incoming"
+      : "outgoing";
+
+    // Save the messages using the store
+    const success = await saveMessages(messageType, structuredMessage);
+
+    if (success) {
+      alert("Flow saved successfully!");
+    } else {
+      throw new Error("Failed to save the flow");
+    }
+  } catch (error) {
+    console.error("Error saving flow:", error);
+    alert("Failed to save the flow. Please try again.");
+  } finally {
+    isSaving.value = false;
+  }
+};
+
+onMounted(async () => {
+  // Always fetch messages on mount to ensure we have the latest data
+  await fetchMessages();
 });
 </script>
 
@@ -129,7 +174,7 @@ onMounted(() => {
   z-index: 5;
 }
 
-.export-btn {
+.save-btn {
   padding: 8px 16px;
   background-color: #4caf50;
   color: white;
@@ -138,10 +183,16 @@ onMounted(() => {
   cursor: pointer;
   font-size: 14px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  transition: background-color 0.2s;
 }
 
-.export-btn:hover {
+.save-btn:hover:not(:disabled) {
   background-color: #45a049;
+}
+
+.save-btn:disabled {
+  background-color: #cccccc;
+  cursor: not-allowed;
 }
 
 .flow-container {

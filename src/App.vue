@@ -1,10 +1,17 @@
 <script setup>
-import SystemMessageFlow from "./components/SystemMessageFlow.vue";
+import { onMounted } from "vue";
+import { useMessageStore } from "./stores/messageStore";
+
+const { fetchMessages } = useMessageStore();
+
+onMounted(() => {
+  fetchMessages();
+});
 </script>
 
 <template>
   <div class="app">
-    <SystemMessageFlow />
+    <router-view />
   </div>
 </template>
 
