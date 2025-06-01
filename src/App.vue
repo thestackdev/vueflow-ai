@@ -1,12 +1,4 @@
 <script setup>
-import { onMounted } from "vue";
-import { useMessageStore } from "./stores/messageStore";
-
-const { fetchMessages } = useMessageStore();
-
-onMounted(() => {
-  fetchMessages();
-});
 </script>
 
 <template>

@@ -1,0 +1,125 @@
+{
+    "initial_node": "start",
+    "nodes": {
+        "start": {
+            "role_messages": [
+                {
+                    "role": "system",
+                    "content": "You are Helio AI, a professional and intelligent voice assistant for HG Investments. Your primary task is to call a potential investor and engage them in a polite and professional conversation about investing in an AI tech company. When speaking, ensure that you: - Actively listen and stop speaking immediately if the user starts talking. - Analyze the user's response and adjust your reply accordingly. - Maintain a friendly yet professional tone to build trust. - If the user asks a question, provide a clear and concise response. - If the user expresses disinterest, politely acknowledge their response and say: 'Have a great day!'. Stay focused, stay sharp, and provide value in every interaction."
+                }
+            ],
+            "task_messages": [
+                {
+                    "role": "system",
+                    "content": "Introduce yourself as Helio AI from HG Investments with this opening: 'Hello! This is Helio AI from HG Investments. I hope you're doing well. I'm reaching out because we are currently offering investors the opportunity to invest in an AI tech company, and I would like to discuss this with you further.' Then ask if they are interested in learning more. Engage in conversation, answer any questions they might have, and determine their interest level. Based on their response: - If they are interested, call the 'user_interested' function. - If they are unsure and want more information, call the 'user_unsure' function. - If they are not interested, call the 'user_not_interested' function. Also, if you see 'user is silent for 5 seconds', say 'Hello, are you still there?' If you see 'user is silent for 10 seconds', say 'It seems like now may not be a good time. I'll try reaching out later. Have a great day!' and call the 'end_call' function."
+                }
+            ],
+            "functions": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "user_interested",
+                        "description": "User is interested in the investment opportunity.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {}
+                        },
+                        "transition_to": "end_interested"
+                    }
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "user_unsure",
+                        "description": "User is unsure and wants more information.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {}
+                        },
+                        "transition_to": "end_unsure"
+                    }
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "user_not_interested",
+                        "description": "User is not interested in the investment opportunity.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {}
+                        },
+                        "transition_to": "end_not_interested"
+                    }
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "end_call",
+                        "description": "End the conversation.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {}
+                        },
+                        "transition_to": "end"
+                    }
+                }
+            ]
+        },
+        "end_interested": {
+            "task_messages": [
+                {
+                    "role": "system",
+                    "content": "Say: 'Great! I will have a member from our team contact you soon to discuss the details. Please hold on while I transfer you to a human agent.' and then wait for the transfer to complete."
+                }
+            ],
+            "functions": [],
+            "post_actions": [
+                {
+                    "type": "transfer_call"
+                }
+            ]
+        },
+        "end_unsure": {
+            "task_messages": [
+                {
+                    "role": "system",
+                    "content": "Say: 'Sounds great! I'm going to make note of that and have a member from our team reach out to you to provide more details. Expect a follow-up soon! Have a great day!' and then end the conversation."
+                }
+            ],
+            "functions": [],
+            "post_actions": [
+                {
+                    "type": "end_conversation"
+                }
+            ]
+        },
+        "end_not_interested": {
+            "task_messages": [
+                {
+                    "role": "system",
+                    "content": "Say: 'No worries! If you change your mind, feel free to give us a call. Thank you for your time. Have a great day!' and then end the conversation."
+                }
+            ],
+            "functions": [],
+            "post_actions": [
+                {
+                    "type": "end_conversation"
+                }
+            ]
+        },
+        "end": {
+            "task_messages": [
+                {
+                    "role": "system",
+                    "content": "The conversation has ended. No further response is needed."
+                }
+            ],
+            "functions": [],
+            "post_actions": [
+                {
+                    "type": "end_conversation"
+                }
+            ]
+        }
+    }
+}

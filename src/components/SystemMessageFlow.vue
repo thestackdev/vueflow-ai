@@ -5,25 +5,32 @@
         {{ isSaving ? "Saving..." : "Save Flow" }}
       </button>
     </div>
-    <VueFlow
-      v-model="elements"
-      class="flow-container"
-      :default-zoom="1.0"
-      :min-zoom="0.1"
-      :max-zoom="4"
-      :node-types="nodeTypes"
-      fit-view-on-init
-    >
-      <Background pattern-color="#aaa" gap="8" />
-      <Controls />
-      <MiniMap />
-    </VueFlow>
+
+    <div class="flow-container">
+      <VueFlow
+        v-model="elements"
+        class="flow"
+        :default-zoom="1.0"
+        :min-zoom="0.1"
+        :max-zoom="4"
+        :node-types="nodeTypes"
+        @connect="onConnect"
+        :connection-mode="ConnectionMode.Loose"
+        :snap-to-grid="true"
+        :snap-grid="[15, 15]"
+        fit-view-on-init
+      >
+        <Background pattern-color="#aaa" gap="8" />
+        <Controls />
+        <MiniMap />
+      </VueFlow>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from "vue";
-import { VueFlow } from "@vue-flow/core";
+import { ref, onMounted } from "vue";
+import { VueFlow, useVueFlow, ConnectionMode } from "@vue-flow/core";
 import { Background } from "@vue-flow/background";
 import { Controls } from "@vue-flow/controls";
 import { MiniMap } from "@vue-flow/minimap";
@@ -31,132 +38,96 @@ import "@vue-flow/core/dist/style.css";
 import "@vue-flow/core/dist/theme-default.css";
 import "@vue-flow/minimap/dist/style.css";
 import "@vue-flow/controls/dist/style.css";
-import SystemMessageNode from "./SystemMessageNode.vue";
+import StartNode from "./nodes/StartNode.vue";
+import EndNode from "./nodes/EndNode.vue";
+import EndInterestedNode from "./nodes/EndInterestedNode.vue";
+import EndUnsureNode from "./nodes/EndUnsureNode.vue";
+import EndNotInterestedNode from "./nodes/EndNotInterestedNode.vue";
 import { useRoute } from "vue-router";
-import { useMessageStore } from "../stores/messageStore";
+import haInvestments from "../data/flows/ha-investments-campaign.json";
 
 const nodeTypes = {
-  "system-message": SystemMessageNode,
+  start: StartNode,
+  end: EndNode,
+  end_interested: EndInterestedNode,
+  end_unsure: EndUnsureNode,
+  end_not_interested: EndNotInterestedNode,
 };
 
 const elements = ref([]);
 const isSaving = ref(false);
 const route = useRoute();
-const { messageData, fetchMessages, saveMessages } = useMessageStore();
+const { project } = useVueFlow();
 
-// Generate edges to connect nodes sequentially
-const generateEdges = (nodes) => {
-  return nodes.slice(1).map((node, index) => ({
-    id: `edge-${index + 1}`,
-    source: nodes[index].id,
-    target: node.id,
-    type: "smoothstep",
-    label: "↓",
-    style: { stroke: "#a094e0" },
-  }));
-};
-
-const getFlowConfig = () => {
-  if (route.path.includes("incoming")) {
-    return {
-      nodes: Object.entries(messageData.value.incoming || {}).map(
-        ([key, content], index) => ({
-          id: `node-${index + 1}`,
-          type: "system-message",
-          position: { x: 250, y: 100 + index * 250 },
-          label: key
-            .split("_")
-            .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-            .join(" "),
-          data: {
-            content: content.trim(),
-          },
-        })
-      ),
-      title: "Incoming Call Handler",
-    };
-  } else if (route.path.includes("outgoing")) {
-    return {
-      nodes: Object.entries(messageData.value.outgoing || {}).map(
-        ([key, content], index) => ({
-          id: `node-${index + 1}`,
-          type: "system-message",
-          position: { x: 250, y: 100 + index * 250 },
-          label: key
-            .split("_")
-            .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-            .join(" "),
-          data: {
-            content: content.trim(),
-          },
-        })
-      ),
-      title: "Outgoing Call Handler",
-    };
-  }
-
-  return {
-    nodes: [],
-    title: "System Message Flow",
-  };
-};
-
-// Watch for changes in messageData and update flow when data is available
-watch(
-  messageData,
-  async (newData) => {
-    if (newData && (newData.incoming || newData.outgoing)) {
-      const flowConfig = getFlowConfig();
-      elements.value = [
-        ...flowConfig.nodes,
-        ...generateEdges(flowConfig.nodes),
-      ];
-    }
-  },
-  { immediate: true }
-);
-
-// Save function to update the system messages via API
-const saveFlow = async () => {
-  isSaving.value = true;
-
-  try {
-    // Get all nodes and their content
-    const nodes = elements.value.filter((el) => el.type === "system-message");
-
-    // Create a structured object from the nodes
-    const structuredMessage = nodes.reduce((acc, node) => {
-      // Convert the label back to snake_case for the key
-      const key = node.label.toLowerCase().split(" ").join("_");
-      acc[key] = node.data.content;
-      return acc;
-    }, {});
-
-    // Determine the message type based on the route
-    const messageType = route.path.includes("incoming")
-      ? "incoming"
-      : "outgoing";
-
-    // Save the messages using the store
-    const success = await saveMessages(messageType, structuredMessage);
-
-    if (success) {
-      alert("Flow saved successfully!");
-    } else {
-      throw new Error("Failed to save the flow");
-    }
-  } catch (error) {
-    console.error("Error saving flow:", error);
-    alert("Failed to save the flow. Please try again.");
-  } finally {
-    isSaving.value = false;
-  }
-};
-
+// Initialize with ha-investments flow
 onMounted(async () => {
-  // Always fetch messages on mount to ensure we have the latest data
-  await fetchMessages();
+  const nodes = Object.entries(haInvestments.nodes).map(
+    ([type, data], index) => ({
+      id: type,
+      type,
+      position: { x: index * 300, y: 100 },
+      data,
+    })
+  );
+
+  // Add edges based on functions
+  const edges = [];
+  Object.entries(haInvestments.nodes).forEach(([nodeId, nodeData]) => {
+    if (nodeData.functions) {
+      nodeData.functions.forEach((func) => {
+        if (func.function.transition_to) {
+          edges.push({
+            id: `${nodeId}-${func.function.transition_to}`,
+            source: nodeId,
+            target: func.function.transition_to,
+            type: "smoothstep",
+            animated: true,
+            label: func.function.name,
+          });
+        }
+      });
+    }
+  });
+
+  elements.value = [...nodes, ...edges];
 });
+
+// Add connection validation
+const isValidConnection = (connection) => {
+  const sourceNode = elements.value.find((el) => el.id === connection.source);
+  const targetNode = elements.value.find((el) => el.id === connection.target);
+
+  if (!sourceNode || !targetNode) return false;
+
+  // Prevent connecting a node to itself
+  if (sourceNode.id === targetNode.id) return false;
+
+  // Check if the connection is valid based on ha-investments flow
+  const sourceData = haInvestments.nodes[sourceNode.id];
+  if (!sourceData.functions) return false;
+
+  return sourceData.functions.some(
+    (func) => func.function.transition_to === targetNode.id
+  );
+};
+
+// Add connection handler
+const onConnect = (connection) => {
+  if (isValidConnection(connection)) {
+    const newEdge = {
+      id: `edge-${Date.now()}`,
+      source: connection.source,
+      target: connection.target,
+      type: "smoothstep",
+      animated: true,
+      style: { stroke: "#555" },
+    };
+    elements.value = [...elements.value, newEdge];
+  }
+};
+
+// Save function to update the flow
+const saveFlow = async () => {};
 </script>
 
 <style scoped>
@@ -200,26 +171,19 @@ onMounted(async () => {
   height: 100%;
 }
 
-/* Styles for nodes of type "system-message" */
-:deep(.vue-flow__node-system-message) {
-  background: #e9e7fd;
-  border: 1px solid #a094e0;
-  border-radius: 8px;
-  padding: 15px;
-  font-size: 12px;
-  text-align: left;
-  min-width: 200px;
-  max-width: 300px;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+.flow {
+  flex: 1;
+  height: 100%;
 }
 
-:deep(.vue-flow__node-system-message .vue-flow__node-label),
-:deep(.vue-flow__node-default .vue-flow__node-label) {
-  font-weight: bold;
-  margin-bottom: 8px;
-  display: block;
-  color: #333;
-  font-size: 14px;
+:deep(.vue-flow__node) {
+  padding: 0;
+  border-radius: 8px;
+  width: auto;
+  font-size: 12px;
+  text-align: left;
+  border-width: 1px;
+  border-style: solid;
 }
 
 :deep(.vue-flow__edge-text) {

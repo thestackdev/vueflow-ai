@@ -12,7 +12,7 @@ export const routes = [
         }
     },
     {
-        path: '/flow/incoming',
+        path: '/flow/ha-investments-campaign',
         name: 'incoming',
         component: SystemMessageFlow,
         meta: {
@@ -20,15 +20,6 @@ export const routes = [
             requiresAuth: false
         }
     },
-    {
-        path: '/flow/outgoing',
-        name: 'outgoing',
-        component: SystemMessageFlow,
-        meta: {
-            title: 'Outgoing Call Handler',
-            requiresAuth: false
-        }
-    }
 ]
 
 // Helper function to get route by name
