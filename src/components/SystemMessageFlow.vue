@@ -31,11 +31,29 @@
     <ConfigModal
       :show="showConfigModal"
       :data="currentNodeData"
+      :nodes="allNodes"
       @close="closeConfigModal"
       @save="handleSaveConfig"
     />
 
-    <!-- Add JSON Display Modal -->
+    <!-- Node Type Selection Modal -->
+    <div v-if="showNodeTypeModal" class="node-type-modal-overlay">
+      <div class="node-type-modal">
+        <h3>Select Node Type</h3>
+        <div class="node-type-list">
+          <button
+            v-for="type in availableNodeTypes"
+            :key="type.value"
+            @click="selectNodeType(type.value)"
+          >
+            {{ type.label }}
+          </button>
+        </div>
+        <button class="close-btn" @click="closeNodeTypeModal">Cancel</button>
+      </div>
+    </div>
+
+    <!-- JSON Display Modal -->
     <div v-if="showJsonModal" class="json-modal">
       <div class="json-modal-content">
         <div class="json-modal-header">
@@ -54,7 +72,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, h } from "vue";
+import { ref, onMounted, h, nextTick, computed } from "vue";
 import { VueFlow, useVueFlow, ConnectionMode } from "@vue-flow/core";
 import { Background } from "@vue-flow/background";
 import { Controls } from "@vue-flow/controls";
@@ -63,44 +81,38 @@ import "@vue-flow/core/dist/style.css";
 import "@vue-flow/core/dist/theme-default.css";
 import "@vue-flow/minimap/dist/style.css";
 import "@vue-flow/controls/dist/style.css";
-import StartNode from "./nodes/StartNode.vue";
-import EndNode from "./nodes/EndNode.vue";
-import EndInterestedNode from "./nodes/EndInterestedNode.vue";
-import EndUnsureNode from "./nodes/EndUnsureNode.vue";
-import EndNotInterestedNode from "./nodes/EndNotInterestedNode.vue";
+import BaseNode from "./BaseNode.vue";
 import { useRoute } from "vue-router";
 import haInvestments from "../data/flows/ha-investments-campaign.json";
 import ConfigModal from "./modals/ConfigModal.vue";
 
 const LOCAL_STORAGE_KEY = "vueFlow_ha-investments-campaign";
 
-const nodeTypes = {
-  start: StartNode,
-  end: EndNode,
-  end_interested: EndInterestedNode,
-  end_unsure: EndUnsureNode,
-  end_not_interested: EndNotInterestedNode,
+const nodeTypeLabels = {
+  start: "Start Node",
+  function: "Function Node",
+  end: "End Node",
+  end_interested: "End Interested Node",
+  end_unsure: "End Unsure Node",
+  end_not_interested: "End Not Interested Node",
 };
 
-// Wrap node components to listen for update:data and update elements
-const elements = ref([]);
-const updateNodeData = (id, newData) => {
-  const idx = elements.value.findIndex((el) => el.id === id && !el.source);
-  if (idx !== -1) {
-    elements.value[idx] = {
-      ...elements.value[idx],
-      data: { ...newData },
-    };
-  }
-};
+const nodeTypes = {};
 const nodeTypesWithUpdate = {};
+Object.keys(nodeTypeLabels).forEach((type) => {
+  nodeTypes[type] = BaseNode;
+});
 Object.entries(nodeTypes).forEach(([type, Comp]) => {
   nodeTypesWithUpdate[type] = (nodeProps) =>
     h(Comp, {
       ...nodeProps,
+      type,
+      label: nodeTypeLabels[type] || type,
       data: nodeProps.data,
       "onUpdate:data": (newData) => updateNodeData(nodeProps.id, newData),
       "onOpen-settings": (data) => openConfigModal({ id: nodeProps.id, data }),
+      "onAdd-node": () => openNodeTypeModal(nodeProps.id),
+      "onDelete-node": () => deleteNodeAndEdges(nodeProps.id),
     });
 });
 
@@ -111,6 +123,13 @@ const { project } = useVueFlow();
 const showConfigModal = ref(false);
 const currentNodeData = ref(null);
 const currentNodeId = ref(null);
+
+const elements = ref([]);
+
+// Compute all nodes for passing to ConfigModal
+const allNodes = computed(() => {
+  return elements.value.filter((el) => !el.source);
+});
 
 const openConfigModal = (node) => {
   currentNodeData.value = node.data;
@@ -127,9 +146,39 @@ const closeConfigModal = () => {
 const handleSaveConfig = (updatedData) => {
   if (currentNodeId.value) {
     updateNodeData(currentNodeId.value, updatedData);
-    saveElementsToLocalStorage(); // Persist changes after node config update
+    updateEdgesForNode(currentNodeId.value, updatedData);
+    saveElementsToLocalStorage();
   }
   closeConfigModal();
+};
+
+const updateEdgesForNode = (nodeId, updatedData) => {
+  // Remove existing edges for this node
+  const oldEdges = elements.value.filter(
+    (el) => el.source === nodeId && el.id.startsWith(`edge-${nodeId}-`)
+  );
+  elements.value = elements.value.filter((el) => !oldEdges.includes(el));
+
+  // Add new edges based on updated functions
+  const newEdges = [];
+  if (updatedData.functions && Array.isArray(updatedData.functions)) {
+    updatedData.functions.forEach((func) => {
+      if (func.function && func.function.transition_to) {
+        const targetNodeId = func.function.transition_to;
+        const edgeId = `edge-${nodeId}-${targetNodeId}-${Date.now()}`;
+        newEdges.push({
+          id: edgeId,
+          source: nodeId,
+          target: targetNodeId,
+          type: "smoothstep",
+          animated: true,
+          label: func.function.name,
+          style: { stroke: "#555" },
+        });
+      }
+    });
+  }
+  elements.value = [...elements.value, ...newEdges];
 };
 
 const saveElementsToLocalStorage = () => {
@@ -137,11 +186,9 @@ const saveElementsToLocalStorage = () => {
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(elements.value));
   } catch (error) {
     console.error("Error saving flow to localStorage:", error);
-    // Optionally, notify the user that saving to localStorage failed
   }
 };
 
-// Initialize with ha-investments flow
 onMounted(async () => {
   try {
     const savedElementsString = localStorage.getItem(LOCAL_STORAGE_KEY);
@@ -150,37 +197,32 @@ onMounted(async () => {
       if (Array.isArray(savedElements)) {
         elements.value = savedElements;
         console.log("Flow loaded from localStorage.");
-        return; // Exit if loaded from localStorage
+        return;
       }
     }
   } catch (error) {
     console.error("Error loading flow from localStorage:", error);
-    // Proceed to load from file if localStorage fails
   }
 
   console.log("Loading flow from file as localStorage is empty or invalid.");
-  // Convert ha-investments flow to Vue Flow elements
   const initialNodes = [];
   const initialEdges = [];
 
   Object.entries(haInvestments.nodes).forEach(([nodeId, nodeData]) => {
-    // Find a unique position for each node - simple stagger for now
     const position = {
-      x: (initialNodes.length % 5) * 250, // Arrange in rows of 5
+      x: (initialNodes.length % 5) * 250,
       y: Math.floor(initialNodes.length / 5) * 200,
     };
 
     initialNodes.push({
-      id: nodeId, // Use the ID from the JSON
-      type: nodeData.type || nodeId.split("_NODE")[0], // Infer type from ID if not present, or use a default
+      id: nodeId,
+      type: nodeData.type || nodeId.split("_NODE")[0],
       position,
       data: {
-        // Ensure data is structured as expected by nodes
         role_messages: nodeData.role_messages || [],
         task_messages: nodeData.task_messages || [],
-        functions: nodeData.functions || [], // Keep original functions for now, saveFlow will rebuild based on edges
+        functions: nodeData.functions || [],
         post_actions: nodeData.post_actions || [],
-        // Add any other specific fields your nodes expect from the JSON
       },
     });
 
@@ -203,7 +245,6 @@ onMounted(async () => {
   elements.value = [...initialNodes, ...initialEdges];
 });
 
-// Drag and drop handlers
 const onDragStart = (event, node) => {
   event.dataTransfer.setData("application/vueflow", node.type);
   event.dataTransfer.effectAllowed = "move";
@@ -218,7 +259,6 @@ const onDrop = (event) => {
   const type = event.dataTransfer.getData("application/vueflow");
   const position = project({ x: event.clientX, y: event.clientY });
 
-  // Create a new node with default data based on type
   const defaultData = {
     role_messages: [],
     task_messages: [],
@@ -236,21 +276,15 @@ const onDrop = (event) => {
   elements.value = [...elements.value, newNode];
 };
 
-// Add connection validation
 const isValidConnection = (connection) => {
   const sourceNode = elements.value.find((el) => el.id === connection.source);
   const targetNode = elements.value.find((el) => el.id === connection.target);
 
   if (!sourceNode || !targetNode) return false;
-
-  // Prevent connecting a node to itself
   if (sourceNode.id === targetNode.id) return false;
-
-  // Allow any connection between nodes
   return true;
 };
 
-// Add connection handler
 const onConnect = (connection) => {
   if (isValidConnection(connection)) {
     const newEdge = {
@@ -281,49 +315,28 @@ const saveFlow = async () => {
   isSaving.value = true;
 
   try {
-    // Get all nodes and their content
     const nodes = elements.value.filter((el) => !el.source);
     const edges = elements.value.filter((el) => el.source);
 
-    // Create a structured object from the nodes
     const flowData = {
       initial_node: "start",
       nodes: {},
     };
 
-    // Process each node
     nodes.forEach((node) => {
       const nodeData = {
         role_messages: node.data.role_messages || [],
         task_messages: node.data.task_messages || [],
-        functions: [],
+        functions: node.data.functions || [],
         post_actions: node.data.post_actions || [],
       };
-
-      // Add functions based on outgoing edges
-      const outgoingEdges = edges.filter((edge) => edge.source === node.id);
-      outgoingEdges.forEach((edge) => {
-        const targetNode = nodes.find((n) => n.id === edge.target);
-        if (targetNode) {
-          nodeData.functions.push({
-            type: "function",
-            function: {
-              name: edge.label || `transition_to_${targetNode.id}`,
-              description: `Transition to ${targetNode.id}`,
-              parameters: { type: "object", properties: {} },
-              transition_to: targetNode.id,
-            },
-          });
-        }
-      });
 
       flowData.nodes[node.id] = nodeData;
     });
 
-    // Format the JSON for display
     formattedJson.value = JSON.stringify(flowData, null, 2);
     showJsonModal.value = true;
-    saveElementsToLocalStorage(); // Also save the current elements state to localStorage
+    saveElementsToLocalStorage();
   } catch (error) {
     console.error("Error saving flow:", error);
     alert("Failed to save the flow. Please try again.");
@@ -331,6 +344,77 @@ const saveFlow = async () => {
     isSaving.value = false;
   }
 };
+
+const showNodeTypeModal = ref(false);
+const nodeToAttachFrom = ref(null);
+const availableNodeTypes = [
+  { value: "function", label: "Function Node" },
+  { value: "end", label: "End Node" },
+  { value: "end_interested", label: "End Interested Node" },
+  { value: "end_unsure", label: "End Unsure Node" },
+  { value: "end_not_interested", label: "End Not Interested Node" },
+];
+
+function openNodeTypeModal(fromNodeId) {
+  nodeToAttachFrom.value = fromNodeId;
+  showNodeTypeModal.value = true;
+}
+
+function closeNodeTypeModal() {
+  showNodeTypeModal.value = false;
+  nodeToAttachFrom.value = null;
+}
+
+async function selectNodeType(type) {
+  const fromNodeId = nodeToAttachFrom.value;
+  const fromNode = elements.value.find((el) => el.id === fromNodeId);
+  if (!fromNode) return;
+  const position = {
+    x: fromNode.position.x + 250,
+    y: fromNode.position.y + 50,
+  };
+  const newNodeId = `${type}-${Date.now()}`;
+  const defaultData = {
+    role_messages: [],
+    task_messages: [],
+    functions: [],
+    post_actions: [],
+  };
+  const newNode = {
+    id: newNodeId,
+    type,
+    position,
+    data: defaultData,
+  };
+  elements.value = [
+    ...elements.value,
+    newNode,
+    {
+      id: `edge-${fromNodeId}-${newNodeId}-${Date.now()}`,
+      source: fromNodeId,
+      target: newNodeId,
+      type: "smoothstep",
+      animated: true,
+      style: { stroke: "#555" },
+    },
+  ];
+  closeNodeTypeModal();
+  await nextTick();
+  openConfigModal({ id: newNodeId, data: defaultData });
+}
+
+function deleteNodeAndEdges(nodeId) {
+  elements.value = elements.value.filter(
+    (el) => el.id !== nodeId && el.source !== nodeId && el.target !== nodeId
+  );
+}
+
+function updateNodeData(nodeId, newData) {
+  const node = elements.value.find((el) => el.id === nodeId);
+  if (node) {
+    node.data = newData;
+  }
+}
 </script>
 
 <style scoped>
@@ -339,6 +423,7 @@ const saveFlow = async () => {
   height: 100vh;
   background-color: #f0f0f0;
   position: relative;
+  display: flex;
 }
 
 .controls {
@@ -375,66 +460,6 @@ const saveFlow = async () => {
   display: flex;
 }
 
-.node-palette {
-  width: 200px;
-  background: white;
-  border-right: 1px solid #ddd;
-  padding: 20px;
-  overflow-y: auto;
-}
-
-.palette-title {
-  font-size: 16px;
-  font-weight: bold;
-  color: #333;
-  margin-bottom: 15px;
-}
-
-.palette-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px;
-  margin-bottom: 8px;
-  background: #f8f9fa;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  cursor: grab;
-  transition: all 0.2s;
-}
-
-.palette-item:hover {
-  background: #e9ecef;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-.node-icon {
-  width: 24px;
-  height: 24px;
-  border-radius: 4px;
-}
-
-.node-icon--start {
-  background: #2196f3;
-}
-
-.node-icon--end {
-  background: #f44336;
-}
-
-.node-icon--end_interested {
-  background: #4caf50;
-}
-
-.node-icon--end_unsure {
-  background: #ff9800;
-}
-
-.node-icon--end_not_interested {
-  background: #9c27b0;
-}
-
 .flow {
   flex: 1;
   height: 100%;
@@ -458,7 +483,6 @@ const saveFlow = async () => {
   border-radius: 3px;
 }
 
-/* Add JSON Modal Styles */
 .json-modal {
   position: fixed;
   top: 0;
@@ -540,5 +564,68 @@ const saveFlow = async () => {
 
 .copy-btn:hover {
   background-color: #45a049;
+}
+
+.node-type-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.node-type-modal {
+  background: #fff;
+  border-radius: 10px;
+  padding: 32px 24px 24px 24px;
+  min-width: 320px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.node-type-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 18px 0 12px 0;
+  width: 100%;
+}
+
+.node-type-list button {
+  padding: 12px 18px;
+  border-radius: 6px;
+  border: none;
+  background: #f0f4f8;
+  color: #222;
+  font-size: 1em;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.node-type-list button:hover {
+  background: #21d4fd;
+  color: #fff;
+}
+
+.node-type-modal .close-btn {
+  margin-top: 10px;
+  background: #eee;
+  color: #333;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 16px;
+  cursor: pointer;
+  font-size: 1em;
+}
+
+.node-type-modal .close-btn:hover {
+  background: #ccc;
 }
 </style>
