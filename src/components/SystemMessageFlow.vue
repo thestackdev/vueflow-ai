@@ -85,6 +85,8 @@ import BaseNode from "./BaseNode.vue";
 import { useRoute } from "vue-router";
 import haInvestments from "../data/flows/ha-investments-campaign.json";
 import ConfigModal from "./modals/ConfigModal.vue";
+import { validateFlowConfig } from "../utils/flowParser";
+import { parseVueFlowToHAInvestments } from "../utils/flowParser";
 
 const LOCAL_STORAGE_KEY = "vueFlow_ha-investments-campaign";
 
@@ -318,28 +320,26 @@ const saveFlow = async () => {
     const nodes = elements.value.filter((el) => !el.source);
     const edges = elements.value.filter((el) => el.source);
 
-    const flowData = {
-      initial_node: "start",
-      nodes: {},
+    const flowConfig = {
+      nodes,
+      edges,
     };
 
-    nodes.forEach((node) => {
-      const nodeData = {
-        role_messages: node.data.role_messages || [],
-        task_messages: node.data.task_messages || [],
-        functions: node.data.functions || [],
-        post_actions: node.data.post_actions || [],
-      };
+    const parsedConfig = parseVueFlowToHAInvestments(flowConfig);
 
-      flowData.nodes[node.id] = nodeData;
-    });
+    const validation = validateFlowConfig(parsedConfig);
+    if (!validation.isValid) {
+      throw new Error(
+        "Invalid flow configuration:\n" + validation.errors.join("\n")
+      );
+    }
 
-    formattedJson.value = JSON.stringify(flowData, null, 2);
+    formattedJson.value = JSON.stringify(parsedConfig, null, 2);
     showJsonModal.value = true;
     saveElementsToLocalStorage();
   } catch (error) {
     console.error("Error saving flow:", error);
-    alert("Failed to save the flow. Please try again.");
+    alert("Failed to save the flow:\n" + error.message);
   } finally {
     isSaving.value = false;
   }
@@ -452,6 +452,40 @@ function updateNodeData(nodeId, newData) {
 .save-btn:disabled {
   background-color: #cccccc;
   cursor: not-allowed;
+}
+
+.test-parser-btn {
+  padding: 8px 16px;
+  background-color: #2196f3;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  transition: background-color 0.2s;
+  margin-left: 10px;
+}
+
+.test-parser-btn:hover {
+  background-color: #1976d2;
+}
+
+.run-tests-btn {
+  padding: 8px 16px;
+  background-color: #2196f3;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  transition: background-color 0.2s;
+  margin-left: 10px;
+}
+
+.run-tests-btn:hover {
+  background-color: #1976d2;
 }
 
 .flow-container {

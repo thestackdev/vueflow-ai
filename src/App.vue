@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from "vue";
+import { ref, watch } from "vue";
 import { VueFlow, useVueFlow } from "@vue-flow/core";
 import { Background } from "@vue-flow/background";
 import { Controls } from "@vue-flow/controls";
@@ -185,18 +185,79 @@ function logToObject() {
 }
 
 function exportConfiguration() {
-  const config = toObject();
-  const blob = new Blob([JSON.stringify(config, null, 2)], {
-    type: "application/json",
-  });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = "flow-configuration.json";
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  try {
+    const config = toObject();
+    console.log("📄 VueFlow config:", config);
+
+    // Try to import and use the parser
+    import("./utils/flowParser.js")
+      .then(
+        ({
+          parseVueFlowToHAInvestments,
+          exportHAInvestmentsConfig,
+          validateFlowConfig,
+        }) => {
+          try {
+            console.log("✅ Parser module loaded successfully");
+
+            // Parse the VueFlow configuration to ha-investments format
+            const parsedConfig = parseVueFlowToHAInvestments(config);
+            console.log("✅ Parsed config:", parsedConfig);
+
+            // Validate the configuration
+            const validation = validateFlowConfig(parsedConfig);
+            console.log("✅ Validation result:", validation);
+
+            if (!validation.isValid) {
+              console.error("❌ Validation failed:", validation.errors);
+              alert(
+                "Export validation failed:\n" + validation.errors.join("\n")
+              );
+              return;
+            }
+
+            // Export the configuration with proper formatting
+            const success = exportHAInvestmentsConfig(
+              parsedConfig,
+              "ha-investments-campaign"
+            );
+
+            if (success) {
+              console.log("✅ Configuration exported successfully!");
+              alert("✅ Configuration exported successfully!");
+            }
+          } catch (parseError) {
+            console.error("❌ Parse error:", parseError);
+            alert("Parse failed: " + parseError.message);
+          }
+        }
+      )
+      .catch((importError) => {
+        console.error("❌ Failed to load parser:", importError);
+
+        // Fallback to original export
+        console.log("📄 Using fallback export method");
+        const blob = new Blob([JSON.stringify(config, null, 2)], {
+          type: "application/json",
+        });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "flow-configuration.json";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        alert(
+          "⚠️ Used fallback export. Check console for details.\nError: " +
+            importError.message
+        );
+      });
+  } catch (error) {
+    console.error("❌ Export configuration failed:", error);
+    alert("Export failed: " + error.message);
+  }
 }
 
 function resetTransform() {

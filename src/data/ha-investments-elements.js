@@ -1,5 +1,3 @@
-import { MarkerType } from '@vue-flow/core'
-
 export const initialNodes = [
     {
         "id": "start",
@@ -134,11 +132,7 @@ export const initialNodes = [
                     "content": "Say: 'Great! I will have a member from our team contact you soon to discuss the details. Please hold on while I transfer you to a human agent.' and then wait for the transfer to complete."
                 }
             ],
-            "post_actions": [
-                {
-                    "type": "transfer_call"
-                }
-            ],
+            "post_actions": ["transfer_call"],
             "role_messages": [],
             "pre_actions": [],
             "function_name": "",
@@ -162,11 +156,7 @@ export const initialNodes = [
                     "content": "Say: 'Sounds great! I'm going to make note of that and have a member from our team reach out to you to provide more details. Expect a follow-up soon! Have a great day!' and then end the conversation."
                 }
             ],
-            "post_actions": [
-                {
-                    "type": "end_conversation"
-                }
-            ]
+            "post_actions": ["end_conversation"]
         },
         "class": "light"
     },
@@ -186,11 +176,7 @@ export const initialNodes = [
                     "content": "Say: 'No worries! If you change your mind, feel free to give us a call. Thank you for your time. Have a great day!' and then end the conversation."
                 }
             ],
-            "post_actions": [
-                {
-                    "type": "end_conversation"
-                }
-            ],
+            "post_actions": ["end_conversation"],
             "role_messages": [],
             "pre_actions": [],
             "function_name": "",
@@ -214,11 +200,7 @@ export const initialNodes = [
                     "content": "The conversation has ended. No further response is needed."
                 }
             ],
-            "post_actions": [
-                {
-                    "type": "end_conversation"
-                }
-            ]
+            "post_actions": ["end_conversation"]
         },
         "class": "light"
     }
