@@ -1,12 +1,12 @@
 <script setup>
-import { ref, watch } from "vue";
+import { ref } from "vue";
 import { VueFlow, useVueFlow } from "@vue-flow/core";
 import { Background } from "@vue-flow/background";
 import { Controls } from "@vue-flow/controls";
 import { MiniMap } from "@vue-flow/minimap";
 import { initialEdges, initialNodes } from "./data/ha-investments-elements";
 
-const { onInit, onNodeDragStop, onConnect, addEdges, setViewport, toObject } =
+const { onInit, onNodeDragStop, onConnect, setViewport, toObject, onNodesChange } =
   useVueFlow();
 const nodes = ref(initialNodes);
 const edges = ref(initialEdges);
@@ -33,6 +33,28 @@ onNodeDragStop(({ event, nodes, node }) => {
   console.log("Node Drag Stop", { event, nodes, node });
 });
 
+// Sync node changes (e.g., position updates) back to the nodes ref
+onNodesChange((changes) => {
+  changes.forEach((change) => {
+    // Check if the change is a node removal
+    if (change.type === 'remove') {
+      // If the removed node was the selected node, close the panel
+      if (selectedNode.value && selectedNode.value.id === change.id) {
+        selectedNode.value = null;
+      }
+      return;
+    }
+
+    const node = nodes.value.find((n) => n.id === change.id);
+    if (node) {
+      if (change.type === "position" && change.position) {
+        node.position = { ...change.position };
+      }
+      // Add handling for other change types (e.g., 'dimensions') if needed
+    }
+  });
+});
+
 onConnect((connection) => {
   const sourceNode = nodes.value.find((n) => n.id === connection.source);
   const targetNode = nodes.value.find((n) => n.id === connection.target);
@@ -46,7 +68,14 @@ onConnect((connection) => {
     return;
   }
 
-  addEdges(connection);
+  // Add the new edge directly to the edges ref
+  const newEdge = {
+    id: `e${connection.source}-${connection.target}`,
+    source: connection.source,
+    target: connection.target,
+    // Add additional edge properties if needed (e.g., type, label)
+  };
+  edges.value.push(newEdge);
 });
 
 function updatePos() {
@@ -127,10 +156,10 @@ function addSpecificNode(typeIndex) {
   nodes.value.push(newNode);
 }
 
+// Remaining functions (onNodeClick, closeConfigPanel, etc.) remain unchanged
 function onNodeClick(event) {
   console.log("Node clicked event:", event);
   if (event.node) {
-    // Ensure the node has all required data properties
     if (!event.node.data.role_messages) event.node.data.role_messages = [];
     if (!event.node.data.task_messages) event.node.data.task_messages = [];
     if (!event.node.data.pre_actions) event.node.data.pre_actions = [];
@@ -189,7 +218,6 @@ function exportConfiguration() {
     const config = toObject();
     console.log("📄 VueFlow config:", config);
 
-    // Try to import and use the parser
     import("./utils/flowParser.js")
       .then(
         ({
@@ -199,12 +227,8 @@ function exportConfiguration() {
         }) => {
           try {
             console.log("✅ Parser module loaded successfully");
-
-            // Parse the VueFlow configuration to ha-investments format
             const parsedConfig = parseVueFlowToHAInvestments(config);
             console.log("✅ Parsed config:", parsedConfig);
-
-            // Validate the configuration
             const validation = validateFlowConfig(parsedConfig);
             console.log("✅ Validation result:", validation);
 
@@ -216,7 +240,6 @@ function exportConfiguration() {
               return;
             }
 
-            // Export the configuration with proper formatting
             const success = exportHAInvestmentsConfig(
               parsedConfig,
               "ha-investments-campaign"
@@ -234,8 +257,6 @@ function exportConfiguration() {
       )
       .catch((importError) => {
         console.error("❌ Failed to load parser:", importError);
-
-        // Fallback to original export
         console.log("📄 Using fallback export method");
         const blob = new Blob([JSON.stringify(config, null, 2)], {
           type: "application/json",
@@ -311,130 +332,167 @@ function toggleDarkMode() {
       <button @click="closeConfigPanel" class="close-btn">×</button>
     </div>
 
-    <!-- Function Node Configuration -->
-    <div v-if="selectedNode.type === 'function'" class="function-config">
-      <div class="config-group">
-        <label>Function Name:</label>
-        <input v-model="selectedNode.data.function_name" type="text" />
+    <div class="config-content">
+      <!-- Node Name Configuration -->
+      <div class="config-section">
+        <div class="config-group horizontal">
+          <label>Node Name:</label>
+          <input v-model="selectedNode.data.label" type="text" placeholder="Enter node name" />
+        </div>
       </div>
-      <div class="config-group">
-        <label>Description:</label>
-        <textarea v-model="selectedNode.data.function_description"></textarea>
+
+      <!-- Function Node Configuration -->
+      <div v-if="selectedNode.type === 'function'" class="function-config">
+        <div class="config-group horizontal">
+          <label>Function Name:</label>
+          <input v-model="selectedNode.data.function_name" type="text" placeholder="Enter function name" />
+        </div>
+        <div class="config-group horizontal">
+          <label>Description:</label>
+          <textarea v-model="selectedNode.data.function_description" placeholder="Enter function description"></textarea>
+        </div>
       </div>
+
+      <!-- Non-Function Node Configuration -->
+      <template v-else>
+        <!-- Role Messages -->
+        <div class="config-section">
+          <h4>Role Messages</h4>
+          <button @click="addRoleMessage(selectedNode)" class="add-btn">
+            + Add Message
+          </button>
+          <div
+            v-for="(message, index) in selectedNode.data.role_messages"
+            :key="index"
+            class="message-group"
+          >
+            <div class="config-group horizontal">
+              <label>Role:</label>
+              <input v-model="message.role" placeholder="system, user, assistant" />
+            </div>
+            <div class="config-group horizontal">
+              <label>Content:</label>
+              <textarea v-model="message.content" placeholder="Enter message content"></textarea>
+            </div>
+            <button
+              @click="removeRoleMessage(selectedNode, index)"
+              class="remove-btn"
+            >
+              Remove
+            </button>
+          </div>
+        </div>
+
+        <!-- Task Messages -->
+        <div class="config-section">
+          <h4>Task Messages</h4>
+          <button @click="addTaskMessage(selectedNode)" class="add-btn">
+            + Add Message
+          </button>
+          <div
+            v-for="(message, index) in selectedNode.data.task_messages"
+            :key="index"
+            class="message-group"
+          >
+            <div class="config-group horizontal">
+              <label>Role:</label>
+              <input v-model="message.role" placeholder="system, user, assistant" />
+            </div>
+            <div class="config-group horizontal">
+              <label>Content:</label>
+              <textarea v-model="message.content" placeholder="Enter message content"></textarea>
+            </div>
+            <button
+              @click="removeTaskMessage(selectedNode, index)"
+              class="remove-btn"
+            >
+              Remove
+            </button>
+          </div>
+        </div>
+
+        <!-- Pre Actions -->
+        <div class="config-section">
+          <h4>Pre Actions</h4>
+          <div class="action-group">
+            <label v-for="action in actionOptions" :key="action.id">
+              <input
+                type="checkbox"
+                :checked="selectedNode.data.pre_actions?.includes(action.id)"
+                @change="toggleAction(selectedNode, action.id, 'pre')"
+              />
+              {{ action.label }}
+            </label>
+          </div>
+        </div>
+
+        <!-- Post Actions -->
+        <div class="config-section">
+          <h4>Post Actions</h4>
+          <div class="action-group">
+            <label v-for="action in actionOptions" :key="action.id">
+              <input
+                type="checkbox"
+                :checked="selectedNode.data.post_actions?.includes(action.id)"
+                @change="toggleAction(selectedNode, action.id, 'post')"
+              />
+              {{ action.label }}
+            </label>
+          </div>
+        </div>
+      </template>
     </div>
-
-    <!-- Non-Function Node Configuration -->
-    <template v-else>
-      <!-- Role Messages -->
-      <div class="config-section">
-        <h4>Role Messages</h4>
-        <button @click="addRoleMessage(selectedNode)" class="add-btn">
-          Add Message
-        </button>
-        <div
-          v-for="(message, index) in selectedNode.data.role_messages"
-          :key="index"
-          class="message-group"
-        >
-          <input v-model="message.role" placeholder="Role" />
-          <textarea v-model="message.content" placeholder="Content"></textarea>
-          <button
-            @click="removeRoleMessage(selectedNode, index)"
-            class="remove-btn"
-          >
-            Remove
-          </button>
-        </div>
-      </div>
-
-      <!-- Task Messages -->
-      <div class="config-section">
-        <h4>Task Messages</h4>
-        <button @click="addTaskMessage(selectedNode)" class="add-btn">
-          Add Message
-        </button>
-        <div
-          v-for="(message, index) in selectedNode.data.task_messages"
-          :key="index"
-          class="message-group"
-        >
-          <input v-model="message.role" placeholder="Role" />
-          <textarea v-model="message.content" placeholder="Content"></textarea>
-          <button
-            @click="removeTaskMessage(selectedNode, index)"
-            class="remove-btn"
-          >
-            Remove
-          </button>
-        </div>
-      </div>
-
-      <!-- Pre Actions -->
-      <div class="config-section">
-        <h4>Pre Actions</h4>
-        <div class="action-group">
-          <label v-for="action in actionOptions" :key="action.id">
-            <input
-              type="checkbox"
-              :checked="selectedNode.data.pre_actions?.includes(action.id)"
-              @change="toggleAction(selectedNode, action.id, 'pre')"
-            />
-            {{ action.label }}
-          </label>
-        </div>
-      </div>
-
-      <!-- Post Actions -->
-      <div class="config-section">
-        <h4>Post Actions</h4>
-        <div class="action-group">
-          <label v-for="action in actionOptions" :key="action.id">
-            <input
-              type="checkbox"
-              :checked="selectedNode.data.post_actions?.includes(action.id)"
-              @change="toggleAction(selectedNode, action.id, 'post')"
-            />
-            {{ action.label }}
-          </label>
-        </div>
-      </div>
-    </template>
   </div>
 </template>
 
 <style scoped>
+/* Import Inter font from Google Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+body {
+  font-family: 'Inter', sans-serif;
+  margin: 0;
+  padding: 0;
+}
+
+/* Controls Panel */
 .controls-panel {
   position: absolute;
-  top: 10px;
-  left: 10px;
+  top: 16px;
+  left: 16px;
   z-index: 1000;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .specific-buttons {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 8px;
 }
 
 .add-node-btn {
+  background-color: #007bff; /* Halsell's primary blue */
   color: white;
   border: none;
-  padding: 8px 12px;
+  padding: 10px 16px;
   text-align: center;
-  text-decoration: none;
-  display: inline-block;
-  font-size: 12px;
+  font-size: 14px;
+  font-weight: 500;
   cursor: pointer;
-  border-radius: 4px;
-  transition: all 0.3s;
-  min-width: 120px;
+  border-radius: 6px;
+  transition: background-color 0.3s ease;
+     min-width: 160px;
+   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+ }
+
+.add-node-btn:hover {
+  background-color: #0056b3; /* Darker blue for hover effect */
 }
 
 .normal-btn {
-  background-color: #4caf50;
+  background-color: #4caf50; /* Green for normal nodes */
 }
 
 .normal-btn:hover {
@@ -442,7 +500,7 @@ function toggleDarkMode() {
 }
 
 .input-btn {
-  background-color: #ff9800;
+  background-color: #ff9800; /* Orange for input nodes */
 }
 
 .input-btn:hover {
@@ -450,7 +508,7 @@ function toggleDarkMode() {
 }
 
 .output-btn {
-  background-color: #e91e63;
+  background-color: #e91e63; /* Pink for output nodes */
 }
 
 .output-btn:hover {
@@ -458,7 +516,7 @@ function toggleDarkMode() {
 }
 
 .function-btn {
-  background-color: #9c27b0;
+  background-color: #9c27b0; /* Purple for function nodes */
 }
 
 .function-btn:hover {
@@ -466,106 +524,200 @@ function toggleDarkMode() {
 }
 
 .export-btn {
-  background-color: #2196f3;
+  background-color: #2196f3; /* Light blue for export */
 }
 
 .export-btn:hover {
   background-color: #1976d2;
 }
 
+/* Config Panel */
+.config-panel {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 420px;
+  background: white;
+  padding: 0;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.08);
+  z-index: 1000;
+  max-height: 85vh;
+  overflow: hidden;
+  border: 1px solid #e1e5e9;
+}
+
 .config-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
+  padding: 16px 20px;
+  background: #f8f9fa;
+  border-bottom: 1px solid #e9ecef;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.config-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #2d3748;
+  letter-spacing: -0.01em;
 }
 
 .close-btn {
   background: none;
   border: none;
-  font-size: 24px;
+  font-size: 18px;
   cursor: pointer;
-  color: #666;
-  padding: 0;
+  color: #718096;
+  padding: 4px;
   line-height: 1;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
 }
 
 .close-btn:hover {
-  color: #333;
+  background: #e2e8f0;
+  color: #4a5568;
 }
 
-.config-panel {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  width: 300px;
-  background: white;
+.config-content {
   padding: 20px;
-  border-radius: 8px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-  z-index: 1000;
-  max-height: 90vh;
+  max-height: calc(85vh - 60px);
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .config-section {
-  margin-bottom: 20px;
+  margin-bottom: 24px;
+}
+
+.config-section:last-child {
+  margin-bottom: 0;
 }
 
 .config-group {
-  margin-bottom: 15px;
+  margin-bottom: 16px;
+}
+
+.config-group.horizontal {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 12px;
+  align-items: start;
 }
 
 .config-group label {
   display: block;
-  margin-bottom: 5px;
-  font-weight: bold;
+  margin-bottom: 6px;
+  font-weight: 500;
+  color: #4a5568;
+  font-size: 13px;
+  line-height: 1.4;
+  padding-top: 6px;
+}
+
+.config-group.horizontal label {
+  margin-bottom: 0;
+  text-align: right;
+  padding-top: 8px;
 }
 
 .config-group input,
 .config-group textarea {
   width: 100%;
-  padding: 8px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
+  padding: 8px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: 'Inter', sans-serif;
+  transition: all 0.15s ease;
+  background: #ffffff;
+  color: #374151;
+  line-height: 1.4;
+}
+
+.config-group input:focus,
+.config-group textarea:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
 }
 
 .config-group textarea {
-  height: 80px;
+  height: 60px;
   resize: vertical;
+  min-height: 40px;
 }
 
 .message-group {
-  margin-bottom: 10px;
-  padding: 10px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #fafbfc;
+}
+
+.message-group .config-group {
+  margin-bottom: 8px;
+}
+
+.message-group .config-group:last-child {
+  margin-bottom: 0;
 }
 
 .add-btn {
-  background-color: #4caf50;
+  background: #3b82f6;
   color: white;
   border: none;
-  padding: 5px 10px;
-  border-radius: 4px;
+  padding: 6px 12px;
+  border-radius: 5px;
   cursor: pointer;
-  margin-bottom: 10px;
+  font-size: 12px;
+  font-weight: 500;
+  margin-bottom: 12px;
+  transition: all 0.15s ease;
+  letter-spacing: -0.01em;
+}
+
+.add-btn:hover {
+  background: #2563eb;
 }
 
 .remove-btn {
-  background-color: #f44336;
+  background: #ef4444;
   color: white;
   border: none;
-  padding: 5px 10px;
+  padding: 4px 8px;
   border-radius: 4px;
   cursor: pointer;
-  margin-top: 5px;
+  font-size: 11px;
+  font-weight: 500;
+  margin-top: 6px;
+  transition: all 0.15s ease;
+  letter-spacing: -0.01em;
+}
+
+.remove-btn:hover {
+  background: #dc2626;
 }
 
 .action-group {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+  padding: 12px;
+  background: #f7fafc;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
 }
 
 .action-group label {
@@ -573,43 +725,86 @@ function toggleDarkMode() {
   align-items: center;
   gap: 8px;
   cursor: pointer;
+  font-size: 12px;
+  color: #4a5568;
+  padding: 6px 8px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+  font-weight: 500;
+  margin-bottom: 0;
+  text-align: left;
+  padding-top: 6px;
 }
 
-h3 {
-  margin-top: 0;
-  margin-bottom: 20px;
-  color: #333;
+.action-group label:hover {
+  background: rgba(59, 130, 246, 0.05);
+  color: #2563eb;
+}
+
+.action-group input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  accent-color: #3b82f6;
 }
 
 h4 {
-  margin: 0 0 10px 0;
-  color: #666;
-}
-
-.function-config {
-  margin-bottom: 20px;
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #374151;
+  letter-spacing: -0.01em;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #e5e7eb;
 }
 
 .function-config .config-group {
-  margin-bottom: 15px;
+  margin-bottom: 16px;
 }
 
-.function-config label {
-  display: block;
-  margin-bottom: 5px;
-  font-weight: bold;
+/* Enhanced scrollbar styling */
+.config-content::-webkit-scrollbar {
+  width: 5px;
 }
 
-.function-config input,
-.function-config textarea {
-  width: 100%;
-  padding: 8px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
+.config-content::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 2px;
 }
 
-.function-config textarea {
-  height: 100px;
-  resize: vertical;
+.config-content::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 2px;
+}
+
+.config-content::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .config-panel {
+    width: 100%;
+    top: 0;
+    right: 0;
+    height: 100%;
+    max-height: none;
+    border-radius: 0;
+  }
+
+  .config-group.horizontal {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .config-group.horizontal label {
+    text-align: left;
+    padding-top: 0;
+    margin-bottom: 4px;
+  }
+
+  .action-group {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
